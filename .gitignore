@@ -1,0 +1,30 @@
+# Credenciais do Google Cloud (NUNCA versionar!)
+sa-grupo-i-key.json
+*-key.json
+credentials*.json
+*.pem
+*.p12
+
+# Arquivos do Maven e compilação Java
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+
+# Arquivos gerados localmente em tempo de execução
+downloads/
+amostras/
+
+# IDEs e Sistema Operacional
+.idea/
+*.iml
+.vscode/
+.project
+.classpath
+.settings/
+.DS_Store
+Thumbs.db
