@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FatecShop Cloud | E-commerce com Google Cloud Storage (Grupo I)</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <!-- Cabeçalho Principal -->
+    <header class="topbar">
+        <div class="container topbar-inner">
+            <div class="brand">
+                <div class="brand-logo">FS</div>
+                <div>
+                    <h1>FatecShop <span>Cloud</span></h1>
+                    <p>Fatec Franca • DSM • Grupo I (Hugo Rodrigues, Pablo Nóbrega, Arthur Ferreira)</p>
+                </div>
+            </div>
+            <div class="topbar-actions">
+                <a href="https://storage.googleapis.com/fatec-2026-grupo-i/" target="_blank" rel="noopener" class="btn btn-outline">
+                    Abrir Bucket Público (GCS) ↗
+                </a>
+                <button id="btnAbrirModalCadastro" class="btn btn-primary">
+                    + Cadastrar Produto
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="container main-content">
+        <!-- Painel de Infraestrutura Google Cloud Storage -->
+        <section class="cloud-banner">
+            <div class="cloud-item">
+                <span class="cloud-label">Provedor / Projeto GCP</span>
+                <strong>Google Cloud Storage • <code>serjava-demo</code></strong>
+            </div>
+            <div class="cloud-item">
+                <span class="cloud-label">Bucket do Grupo</span>
+                <strong><code>fatec-2026-grupo-i</code> (us-central1 • STANDARD)</strong>
+            </div>
+            <div class="cloud-item">
+                <span class="cloud-label">Service Account (Java Backend)</span>
+                <strong><code>sa-grupo-i@serjava-demo.iam.gserviceaccount.com</code></strong>
+            </div>
+            <div class="cloud-item stats-pills">
+                <span class="pill" id="statTotalProdutos">0 produtos</span>
+                <span class="pill pill-blue" id="statTotalImagens">0 imagens</span>
+            </div>
+        </section>
+
+        <!-- Barra de Ferramentas da Vitrine -->
+        <section class="toolbar">
+            <div class="toolbar-title">
+                <h2>Vitrine de Produtos (Catálogo no GCS)</h2>
+                <p>Cada produto abaixo é lido em tempo real de um objeto <code>produtos/produto-XXX.json</code> armazenado no Google Cloud Storage.</p>
+            </div>
+            <div class="toolbar-controls">
+                <input type="text" id="inputBusca" placeholder="Buscar por nome, ID ou categoria..." class="input-search">
+                <button id="btnRecarregar" class="btn btn-secondary" title="Consultar bucket novamente">
+                    ↻ Atualizar do Bucket
+                </button>
+            </div>
+        </section>
+
+        <!-- Alerta de Feedback -->
+        <div id="toastNotificacao" class="toast hidden"></div>
+
+        <!-- Grid de Produtos do E-commerce -->
+        <section id="gridProdutos" class="products-grid">
+            <div class="loading-state">Consultando objetos no bucket <code>fatec-2026-grupo-i</code>...</div>
+        </section>
+
+        <!-- Explorador Ao Vivo de Objetos do Bucket -->
+        <section class="bucket-explorer">
+            <div class="explorer-header">
+                <div>
+                    <h2>Explorador de Objetos no Bucket (<code>fatec-2026-grupo-i</code>)</h2>
+                    <p>Visualização direta dos caminhos armazenados no Google Cloud Storage para comprovação das operações de upload, leitura, download e exclusão.</p>
+                </div>
+            </div>
+
+            <div class="explorer-columns">
+                <div class="explorer-card">
+                    <h3>📁 Prefixo <code>produtos/</code> (Arquivos JSON)</h3>
+                    <ul id="listaObjetosProdutos" class="object-list">
+                        <li>Carregando...</li>
+                    </ul>
+                </div>
+                <div class="explorer-card">
+                    <h3>🖼️ Prefixo <code>imagens/</code> (Mídia Pública)</h3>
+                    <ul id="listaObjetosImagens" class="object-list">
+                        <li>Carregando...</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal 1: Cadastrar Novo Produto (com Upload de Imagem) -->
+    <div id="modalCadastro" class="modal-backdrop hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Cadastrar Novo Produto no E-commerce</h3>
+                <button class="btn-close" id="btnFecharModalCadastro">&times;</button>
+            </div>
+            <form id="formCadastroProduto" class="modal-body">
+                <div class="form-group">
+                    <label for="campoNome">Nome do Produto *</label>
+                    <input type="text" id="campoNome" required minlength="3" maxlength="120" placeholder="Ex: Headset Gamer Surround 7.1">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="campoCategoria">Categoria *</label>
+                        <input type="text" id="campoCategoria" required minlength="2" maxlength="60" placeholder="Ex: Periféricos">
+                    </div>
+                    <div class="form-group">
+                        <label for="campoPreco">Preço (R$) *</label>
+                        <input type="text" id="campoPreco" required placeholder="Ex: 349,90">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="campoDescricao">Descrição do Produto *</label>
+                    <textarea id="campoDescricao" rows="3" required minlength="5" maxlength="500" placeholder="Descreva as especificações do produto..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="campoImagem">Imagem do Produto (Opcional — salva em <code>imagens/produto-XXX</code>)</label>
+                    <input type="file" id="campoImagem" accept=".png,.jpg,.jpeg,.webp,.gif" class="file-input">
+                    <small class="form-hint">Se selecionada, a imagem será enviada via stream pelo backend Java ao bucket e vinculada automaticamente ao JSON do produto.</small>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btnCancelarCadastro">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="btnSalvarProduto">Salvar no Google Cloud Storage</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 2: Consultar Detalhes e Ler JSON Bruto do GCS -->
+    <div id="modalDetalhes" class="modal-backdrop hidden">
+        <div class="modal-card modal-large">
+            <div class="modal-header">
+                <h3 id="tituloModalDetalhes">Detalhes do Objeto no GCS</h3>
+                <button class="btn-close" id="btnFecharModalDetalhes">&times;</button>
+            </div>
+            <div class="modal-body" id="corpoModalDetalhes">
+                <!-- Preenchido via JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Input oculto para trocar/enviar imagem de um produto já cadastrado -->
+    <input type="file" id="inputUploadImagemRapido" accept=".png,.jpg,.jpeg,.webp,.gif" class="hidden">
+
+    <footer class="footer">
+        <div class="container">
+            <p>Atividade Acadêmica — Desenvolvimento de Software Multiplataforma (Fatec Franca) • Backend em <strong>Java 21 + SDK Oficial <code>google-cloud-storage</code></strong></p>
+        </div>
+    </footer>
+
+    <script src="/app.js"></script>
+</body>
+</html>
