@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     carregarTudoDoBucket();
 
     document.getElementById('btnRecarregar').addEventListener('click', () => {
-        mostrarToast('Consultando objetos atualizados no Google Cloud Storage...');
+        mostrarToast('Atualizando produtos...');
         carregarTudoDoBucket();
     });
 
@@ -59,9 +59,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const arquivo = e.target.files[0];
         if (!arquivo || !idProdutoParaUploadImagem) return;
         try {
-            mostrarToast(`Enviando imagem '${arquivo.name}' para o bucket para o ${idProdutoParaUploadImagem}...`);
+            mostrarToast(`Enviando imagem para ${idProdutoParaUploadImagem}...`);
             await enviarImagemProduto(idProdutoParaUploadImagem, arquivo);
-            mostrarToast(`Imagem enviada com sucesso para o Google Cloud Storage!`);
+            mostrarToast('Imagem atualizada com sucesso.');
             await carregarTudoDoBucket();
         } catch (err) {
             mostrarToast(err.message || 'Erro ao enviar imagem.', true);
@@ -86,7 +86,7 @@ async function carregarProdutos() {
         if (!resp.ok) throw new Error(dados.mensagem || 'Erro ao listar produtos do GCS');
 
         listaProdutosCache = dados;
-        statTotalProdutos.textContent = `${dados.length} produto(s)`;
+        statTotalProdutos.textContent = `${dados.length} ${dados.length === 1 ? 'produto' : 'produtos'}`;
         renderizarVitrine(dados);
     } catch (err) {
         gridProdutos.innerHTML = `<div class="empty-state">Erro ao comunicar com o backend Java / GCS: ${err.message}</div>`;
@@ -101,7 +101,7 @@ async function carregarObjetosDoBucket() {
 
         const objsProd = dados.objetosProdutos || [];
         const objsImg = dados.objetosImagens || [];
-        statTotalImagens.textContent = `${objsImg.length} imagem(ns)`;
+        statTotalImagens.textContent = `${objsImg.length} ${objsImg.length === 1 ? 'imagem' : 'imagens'}`;
 
         if (objsProd.length === 0) {
             listaObjetosProdutos.innerHTML = `<li class="object-item">Nenhum arquivo JSON em <code>produtos/</code></li>`;
@@ -155,8 +155,8 @@ function renderizarVitrine(produtos) {
     if (filtrados.length === 0) {
         gridProdutos.innerHTML = `
             <div class="empty-state">
-                <h3>Nenhum produto encontrado no bucket</h3>
-                <p>Clique em <strong>"+ Cadastrar Produto"</strong> no topo da página para enviar um novo produto ao Google Cloud Storage.</p>
+                <h3>Nenhum produto encontrado</h3>
+                <p>Tente outro termo ou cadastre um novo produto.</p>
             </div>
         `;
         return;
@@ -172,9 +172,9 @@ function renderizarVitrine(produtos) {
         const htmlImagem = p.urlPublicaImagem
             ? `<img src="${p.urlPublicaImagem}?t=${Date.now()}" alt="${escaparHtml(p.nome)}">`
             : `<div class="no-image-placeholder">
-                   <p>Sem imagem associada no bucket</p>
-                   <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="dispararUploadImagem('${p.id}')">
-                       📤 Enviar Imagem para o GCS
+                   <p>Foto não disponível</p>
+                   <button class="btn btn-secondary btn-sm" onclick="dispararUploadImagem('${p.id}')">
+                       Adicionar foto
                    </button>
                </div>`;
 
@@ -190,27 +190,19 @@ function renderizarVitrine(produtos) {
                     <div class="product-price">${precoFormatado}</div>
                     <p class="product-desc">${escaparHtml(p.descricao)}</p>
 
-                    <div class="gcs-meta">
-                        <div><strong>Objeto JSON:</strong> <a href="${p.urlPublicaJson}" target="_blank" rel="noopener">${p.caminhoObjetoJson} ↗</a></div>
-                        <div><strong>Objeto Imagem:</strong> ${
-                            p.urlPublicaImagem
-                                ? `<a href="${p.urlPublicaImagem}" target="_blank" rel="noopener">${p.caminhoObjetoImagem} ↗</a>`
-                                : `<span>(não enviada)</span>`
-                        }</div>
-                    </div>
                 </div>
                 <div class="product-actions">
                     <button class="btn btn-secondary btn-sm" onclick="consultarProdutoDetalhes('${p.id}')">
-                        🔍 Consultar / JSON
+                        Ver detalhes
                     </button>
                     <button class="btn btn-secondary btn-sm" onclick="dispararUploadImagem('${p.id}')">
-                        🖼️ ${p.urlPublicaImagem ? 'Trocar Foto' : 'Enviar Foto'}
+                        ${p.urlPublicaImagem ? 'Trocar foto' : 'Adicionar foto'}
                     </button>
                     <a class="btn btn-secondary btn-sm" href="/api/objetos/download?caminho=${encodeURIComponent(p.caminhoObjetoJson)}">
-                        ⬇️ Baixar JSON
+                        Baixar dados
                     </a>
                     <button class="btn btn-danger btn-sm" onclick="confirmarExclusaoProduto('${p.id}', '${escaparHtml(p.nome)}')">
-                        🗑️ Excluir
+                        Excluir
                     </button>
                 </div>
             </article>
@@ -227,10 +219,10 @@ async function salvarNovoProduto(e) {
     const arquivoImagem = document.getElementById('campoImagem').files[0];
 
     btnSalvarProduto.disabled = true;
-    btnSalvarProduto.textContent = 'Enviando para o GCS...';
+    btnSalvarProduto.textContent = 'Salvando...';
 
     try {
-        // 1. Cria o produto e envia o arquivo JSON para "produtos/produto-XXX.json"
+        // Cria o produto antes de enviar a imagem opcional.
         const resp = await fetch('/api/produtos', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -239,19 +231,18 @@ async function salvarNovoProduto(e) {
         const produtoCriado = await resp.json();
         if (!resp.ok) throw new Error(produtoCriado.mensagem || 'Erro ao cadastrar produto.');
 
-        // 2. Se o usuário selecionou uma imagem, envia para "imagens/produto-XXX.<ext>"
         if (arquivoImagem) {
             await enviarImagemProduto(produtoCriado.id, arquivoImagem);
         }
 
         modalCadastro.classList.add('hidden');
-        mostrarToast(`Produto '${produtoCriado.id}' (${produtoCriado.nome}) salvo com sucesso no bucket fatec-2026-grupo-i!`);
+        mostrarToast('Produto salvo com sucesso.');
         await carregarTudoDoBucket();
     } catch (err) {
         mostrarToast(err.message, true);
     } finally {
         btnSalvarProduto.disabled = false;
-        btnSalvarProduto.textContent = 'Salvar no Google Cloud Storage';
+        btnSalvarProduto.textContent = 'Salvar produto';
     }
 }
 
