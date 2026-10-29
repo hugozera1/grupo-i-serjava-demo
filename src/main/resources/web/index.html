@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FatecShop | Loja do Grupo I</title>
+    <title>FatecShop Cloud | Grupo I</title>
     <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -12,53 +12,61 @@
             <div class="brand">
                 <a class="brand-logo" href="/" aria-label="FatecShop, início">FS</a>
                 <div>
-                    <h1>FatecShop</h1>
+                    <h1>FatecShop Cloud</h1>
                     <p>Fatec Franca · DSM · Grupo I</p>
                 </div>
             </div>
             <div class="topbar-actions">
+                <button id="btnCargaDemo" class="btn btn-demo" title="Cadastra 10 produtos e envia 3 imagens reais para cada um no bucket GCS">
+                    ⚡ Carga Demo (10 produtos x 3 fotos)
+                </button>
                 <a href="https://storage.googleapis.com/fatec-2026-grupo-i/" target="_blank" rel="noopener" class="btn btn-outline">
-                    Acessar arquivos
+                    Bucket no GCS ↗
                 </a>
                 <button id="btnAbrirModalCadastro" class="btn btn-primary">
-                    Cadastrar produto
+                    + Cadastrar produto
                 </button>
             </div>
         </div>
     </header>
 
     <main class="container main-content">
-        <details class="cloud-banner">
+        <details class="cloud-banner" open>
             <summary>
-                <span>Sobre o projeto</span>
+                <span>Arquitetura do Projeto & Infraestrutura</span>
                 <span class="stats-pills">
+                    <span class="pill pill-green" id="statBancoDados">SQLite (ecommerce.db)</span>
                     <span class="pill" id="statTotalProdutos">0 produtos</span>
-                    <span class="pill pill-blue" id="statTotalImagens">0 imagens</span>
+                    <span class="pill pill-blue" id="statTotalImagens">0 fotos</span>
                 </span>
             </summary>
             <div class="cloud-item">
-                <span class="cloud-label">Provedor e projeto</span>
-                <strong>Google Cloud Storage • <code>serjava-demo</code></strong>
+                <span class="cloud-label">Banco de dados local</span>
+                <strong>SQLite embutido • <code>ecommerce.db</code> (produtos e metadados)</strong>
             </div>
             <div class="cloud-item">
-                <span class="cloud-label">Bucket</span>
+                <span class="cloud-label">Bucket GCS (Apenas Imagens)</span>
                 <strong><code>fatec-2026-grupo-i</code> (us-central1 • STANDARD)</strong>
             </div>
             <div class="cloud-item">
                 <span class="cloud-label">Conta de serviço</span>
                 <strong><code>sa-grupo-i@serjava-demo.iam.gserviceaccount.com</code></strong>
             </div>
+            <div class="cloud-item">
+                <span class="cloud-label">Múltiplas Fotos & Capa</span>
+                <strong>1:N imagens por produto com seleção de capa e exclusão individual</strong>
+            </div>
         </details>
 
         <section class="toolbar">
             <div class="toolbar-title">
-                <p class="eyebrow">FatecShop · Grupo I</p>
-                <h2>Nossa vitrine</h2>
-                <p>Confira os produtos disponíveis e encontre o que procura.</p>
+                <p class="eyebrow">Catálogo Oficial · Grupo I</p>
+                <h2>Vitrine de Produtos</h2>
+                <p>Navegue pelo catálogo com imagens servidas diretamente pelo Google Cloud Storage.</p>
             </div>
             <div class="toolbar-controls">
-                <input type="text" id="inputBusca" placeholder="Buscar produtos..." class="input-search" aria-label="Buscar produtos">
-                <button id="btnRecarregar" class="btn btn-secondary" title="Atualizar produtos">
+                <input type="text" id="inputBusca" placeholder="Buscar por nome, categoria ou ID..." class="input-search" aria-label="Buscar produtos">
+                <button id="btnRecarregar" class="btn btn-secondary" title="Atualizar catálogo">
                     Atualizar
                 </button>
             </div>
@@ -67,39 +75,32 @@
         <div id="toastNotificacao" class="toast hidden"></div>
 
         <section id="gridProdutos" class="products-grid">
-            <div class="loading-state">Carregando produtos...</div>
+            <div class="loading-state">Carregando catálogo do SQLite e fotos do GCS...</div>
         </section>
 
         <details class="bucket-explorer">
-            <summary>Arquivos do catálogo</summary>
+            <summary>Explorador de Imagens no Bucket GCS (<code>imagens/</code>)</summary>
             <div class="explorer-header">
                 <div>
-                    <h2>Arquivos armazenados</h2>
-                    <p>Consulte os arquivos de dados e imagens associados aos produtos.</p>
+                    <h2>Arquivos de Imagens no Google Cloud Storage</h2>
+                    <p>Somente arquivos de imagem ficam no bucket <code>fatec-2026-grupo-i</code>, acessíveis por URLs públicas.</p>
                 </div>
             </div>
 
-            <div class="explorer-columns">
-                <div class="explorer-card">
-                    <h3>Produtos <code>produtos/</code></h3>
-                    <ul id="listaObjetosProdutos" class="object-list">
-                        <li>Carregando...</li>
-                    </ul>
-                </div>
-                <div class="explorer-card">
-                    <h3>Imagens <code>imagens/</code></h3>
-                    <ul id="listaObjetosImagens" class="object-list">
-                        <li>Carregando...</li>
-                    </ul>
-                </div>
+            <div class="explorer-card">
+                <h3>Imagens armazenadas em <code>imagens/</code></h3>
+                <ul id="listaObjetosImagens" class="object-list">
+                    <li>Carregando...</li>
+                </ul>
             </div>
         </details>
     </main>
 
+    <!-- Modal de Cadastro de Produto -->
     <div id="modalCadastro" class="modal-backdrop hidden">
         <div class="modal-card">
             <div class="modal-header">
-                <h3>Novo produto</h3>
+                <h3>Cadastrar Novo Produto</h3>
                 <button class="btn-close" id="btnFecharModalCadastro">&times;</button>
             </div>
             <form id="formCadastroProduto" class="modal-body">
@@ -125,35 +126,38 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="campoImagem">Imagem do produto (opcional)</label>
+                    <label for="campoImagem">Primeira Foto (opcional)</label>
                     <input type="file" id="campoImagem" accept=".png,.jpg,.jpeg,.webp,.gif" class="file-input">
-                    <small class="form-hint">Formatos aceitos: PNG, JPG, WEBP ou GIF.</small>
+                    <small class="form-hint">O arquivo será enviado para o Google Cloud Storage e definido como a Capa.</small>
                 </div>
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" id="btnCancelarCadastro">Cancelar</button>
-                    <button type="submit" class="btn btn-primary" id="btnSalvarProduto">Salvar produto</button>
+                    <button type="submit" class="btn btn-primary" id="btnSalvarProduto">Salvar no Banco Local</button>
                 </div>
             </form>
         </div>
     </div>
 
+    <!-- Modal de Detalhes do Produto & Galeria de Imagens -->
     <div id="modalDetalhes" class="modal-backdrop hidden">
         <div class="modal-card modal-large">
             <div class="modal-header">
-                <h3 id="tituloModalDetalhes">Detalhes do produto</h3>
+                <h3 id="tituloModalDetalhes">Detalhes do Produto & Galeria</h3>
                 <button class="btn-close" id="btnFecharModalDetalhes">&times;</button>
             </div>
             <div class="modal-body" id="corpoModalDetalhes">
+                <!-- Preenchido dinamicamente via app.js -->
             </div>
         </div>
     </div>
 
+    <!-- Input invisível para upload rápido a partir do card -->
     <input type="file" id="inputUploadImagemRapido" accept=".png,.jpg,.jpeg,.webp,.gif" class="hidden">
 
     <footer class="footer">
         <div class="container">
-            <p>Projeto acadêmico · Desenvolvimento de Software Multiplataforma · Fatec Franca</p>
+            <p>Fatec Franca · DSM · Projeto de E-commerce com SQLite e Google Cloud Storage · Grupo I</p>
         </div>
     </footer>
 

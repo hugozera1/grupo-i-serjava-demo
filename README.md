@@ -1,6 +1,6 @@
-# FatecShop Cloud — E-commerce com Google Cloud Storage (GCS)
+# FatecShop Cloud — E-commerce com Banco de Dados SQLite e Google Cloud Storage (GCS)
 
-Projeto acadêmico desenvolvido em **Java 21** integrado ao **Google Cloud Storage (GCS)** com **Interface Web de E-commerce (HTML5, CSS3 e JavaScript)** e API REST.
+Projeto acadêmico desenvolvido em **Java 21** com **Banco de Dados Local SQLite (`ecommerce.db`)**, integrado ao **Google Cloud Storage (GCS)**, **Interface Web de E-commerce (HTML5, CSS3 e JavaScript)** e API REST.
 
 ---
 
@@ -8,6 +8,29 @@ Projeto acadêmico desenvolvido em **Java 21** integrado ao **Google Cloud Stora
 - **Hugo de Castro Rodrigues**
 - **Pablo Miguel Sousa Nóbrega**
 - **Arthur Rodrigues Ferreira**
+
+---
+
+## Conformidade com os Requisitos do Projeto
+
+1. **Requisito 1 & Requisito Técnico 1 — Banco de Dados Local + Apenas Imagens no Bucket:**
+   - Os dados dos registros (entidade produto, referências às imagens no GCS, flag de imagem principal/capa e datas) ficam armazenados em um banco de dados local **SQLite embutido (`ecommerce.db`)**.
+   - O bucket do Google Cloud Storage armazena **exclusivamente os arquivos binários de imagem** (sob `imagens/`).
+2. **Requisito 2 — Bucket e Chave Exclusivos do Grupo I:**
+   - Bucket: `fatec-2026-grupo-i`
+   - Projeto: `serjava-demo`
+   - Credencial: `sa-grupo-i-key.json` autenticada via SDK oficial (`GOOGLE_APPLICATION_CREDENTIALS`).
+3. **Requisito 3 — Upload, Listagem e Download via Aplicação Java:**
+   - Upload de imagens via stream (`storage.createFrom` / `uploadBytes`).
+   - Listagem de objetos e download direto pela aplicação Java tanto na Web quanto no menu Console.
+4. **Requisito 4 — URLs Públicas Abertas Diretamente no Navegador:**
+   - URLs no formato `https://storage.googleapis.com/fatec-2026-grupo-i/imagens/...` abrem diretamente no navegador sem autenticação.
+5. **Requisito Técnico 5 — Carga de Demonstração (10 Produtos x 3 Imagens cada = 30 fotos reais):**
+   - Rotina automatizada que cadastra 10 produtos no SQLite e gera/envia 3 imagens reais para cada produto no bucket GCS (total de 30 fotos), já com a imagem principal devidamente marcada.
+6. **Requisito Técnico 6 — Múltiplas Imagens por Produto, Capa e Exclusão Individual:**
+   - Suporta $N$ imagens por produto.
+   - Vitrine exibe a miniatura da imagem principal (capa).
+   - Tela de detalhes exibe a capa em destaque + galeria de fotos com opções: "Definir como Capa", "Baixar" e "Apagar Imagem" (remove do GCS e do SQLite).
 
 ---
 
@@ -25,60 +48,58 @@ Projeto acadêmico desenvolvido em **Java 21** integrado ao **Google Cloud Stora
 ```text
 grupo-i-serjava-demo/
 ├── .gitignore
-├── pom.xml
-├── mvnw / mvnw.cmd
+├── pom.xml                                     # Dependências: GCS SDK, SQLite JDBC, Jackson
+├── mvnw / mvnw.cmd                             # Maven Wrapper
 └── src/
     └── main/
         ├── java/br/edu/fatecfranca/ecommerce/
-        │   ├── Main.java                       # Inicializa Servidor Web (porta 8080) e Menu Console
+        │   ├── Main.java                       # Servidor Web (porta 8080) e Menu Console interativo
+        │   ├── database/
+        │   │   └── DatabaseService.java        # Acesso ao SQLite local (ecommerce.db): produtos e produto_imagens
         │   ├── model/
-        │   │   └── Produto.java                # Entidade de domínio (BigDecimal, metadados GCS)
+        │   │   ├── Produto.java                # Entidade de domínio (preço BigDecimal, capa e N fotos)
+        │   │   └── ProdutoImagem.java          # Metadados de cada foto (caminho GCS, URL pública, flag capa)
         │   ├── service/
-        │   │   ├── GcsStorageService.java      # Operações oficiais do SDK google-cloud-storage
-        │   │   └── ProdutoService.java         # Regras de catálogo, geração de IDs e serialização JSON
+        │   │   ├── GcsStorageService.java      # Operações oficiais do SDK google-cloud-storage (upload stream, get, list, delete)
+        │   │   └── ProdutoService.java         # Regras de negócio, geração de fotos demo e orquestração SQLite + GCS
         │   ├── util/
-        │   │   └── ValidadorEntrada.java       # Validações de dados de entrada
+        │   │   └── ValidadorEntrada.java       # Validações de entradas do usuário
         │   └── web/
-        │       └── ServidorWebEcommerce.java   # API REST + Servidor HTTP para o Frontend Web
+        │       └── ServidorWebEcommerce.java   # API REST e Servidor HTTP embutido para a Interface Web
         └── resources/web/
-            ├── index.html                      # Interface Gráfica da Loja Virtual (FatecShop Cloud)
-            ├── styles.css                      # Estilização responsiva do E-commerce
-            └── app.js                          # Integração Frontend com a API Java / GCS
+            ├── index.html                      # Vitrine Web, Modal de Detalhes, Galeria e Carga Demo
+            ├── styles.css                      # Estilização responsiva do e-commerce
+            └── app.js                          # Integração Frontend (Fetch API) com backend Java
 ```
-
----
-
-## Funcionalidades Implementadas
-
-1. **Cadastrar produto:** Registra nome, descrição, preço (`BigDecimal`) e categoria.
-2. **Armazenar dados no GCS:** Serializa o produto em JSON (`UTF-8`) via Jackson e envia para `produtos/produto-XXX.json` no bucket.
-3. **Upload de imagens:** Envia a imagem do produto via stream (`storage.createFrom`) para `imagens/produto-XXX.<ext>` e vincula a URL pública ao JSON do produto.
-4. **Listar produtos:** Consulta os objetos `produtos/*.json` armazenados no bucket e exibe na vitrine Web e no console.
-5. **Consultar produto:** Localiza um produto específico e exibe seus metadados e o JSON bruto lido diretamente do GCS.
-6. **Demonstrar download ou leitura:** Permite visualizar o conteúdo UTF-8 de qualquer objeto do bucket ou baixá-lo localmente para a pasta `downloads/`.
-7. **Excluir produto:** Remove o arquivo JSON e a imagem correspondente do bucket mediante confirmação prévia.
 
 ---
 
 ## Configuração e Execução
 
-### 1. Configurar a credencial da Service Account
-Posicione o arquivo `sa-grupo-i-key.json` (fornecido pelo professor) na raiz do projeto e configure a variável de ambiente `GOOGLE_APPLICATION_CREDENTIALS` no PowerShell:
+### 1. Credencial da Service Account (`sa-grupo-i-key.json`)
+Posicione o arquivo `sa-grupo-i-key.json` na raiz do projeto (ou configure a variável de ambiente):
 
 ```powershell
 $env:GOOGLE_APPLICATION_CREDENTIALS="$(Get-Location)\sa-grupo-i-key.json"
 ```
 
-> **Segurança:** O arquivo `sa-grupo-i-key.json` está listado no `.gitignore` e nunca deve ser enviado ao repositório Git.
+> **Segurança:** O arquivo `sa-grupo-i-key.json` e os bancos `*.db` estão listados no `.gitignore` e nunca são versionados no Git.
 
-### 2. Compilar e executar a aplicação
+### 2. Compilar e Executar a Aplicação
+
+Usando o Maven Wrapper incluído no projeto:
 
 ```powershell
-mvn clean compile exec:java
+.\mvnw.cmd clean compile exec:java
 ```
 
-*(Ou utilizando o Maven Wrapper incluído no projeto: `.\mvnw.cmd clean compile exec:java`).*
+*(Ou usando Maven instalado: `mvn clean compile exec:java`).*
 
-### 3. Acessar a Interface Web
-Ao iniciar, a aplicação disponibiliza automaticamente o E-commerce em:
+### 3. Acessar a Loja Virtual (Interface Web)
+Ao iniciar, o navegador pode ser aberto automaticamente, ou você pode acessar:
 - **http://localhost:8080**
+
+### 4. Demonstrar a Carga de 10 Produtos com 3 Imagens cada (Req. 5)
+- **Pela Interface Web:** Clique no botão superior **"⚡ Carga Demo (10 produtos x 3 fotos)"**.
+- **Pelo Console:** Escolha a opção **6. Gerar Carga de Demonstração**.
+- A aplicação gerará automaticamente 10 produtos no banco local SQLite e fará o upload de 30 imagens reais para o bucket `fatec-2026-grupo-i` no GCS, definindo a imagem principal de cada um!

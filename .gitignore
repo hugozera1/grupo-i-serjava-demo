@@ -18,6 +18,9 @@ buildNumber.properties
 # Arquivos gerados localmente em tempo de execução
 downloads/
 amostras/
+*.db
+*.db-journal
+*.db-wal
 
 # IDEs e Sistema Operacional
 .idea/

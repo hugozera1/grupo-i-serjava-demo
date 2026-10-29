@@ -1,11 +1,19 @@
 package br.edu.fatecfranca.ecommerce.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 
 /**
  * Representa um produto do catálogo do e-commerce.
- * Seus dados são serializados em JSON e armazenados no bucket como "produtos/produto-XXX.json".
+ * Os dados do registro (entidade, referências às imagens, flag de capa e datas)
+ * são armazenados no banco de dados local SQLite (ecommerce.db), enquanto os
+ * arquivos binários das imagens ficam no Google Cloud Storage (GCS).
  */
 public class Produto {
 
@@ -14,13 +22,9 @@ public class Produto {
     private String descricao;
     private BigDecimal preco;
     private String categoria;
-    private String caminhoObjetoJson;
-    private String urlPublicaJson;
-    private String caminhoObjetoImagem;
-    private String urlPublicaImagem;
     private LocalDateTime dataCadastro;
+    private List<ProdutoImagem> imagens = new ArrayList<>();
 
-    // Construtor padrão exigido pelo Jackson para desserialização JSON
     public Produto() {
     }
 
@@ -31,6 +35,7 @@ public class Produto {
         this.preco = preco;
         this.categoria = categoria;
         this.dataCadastro = LocalDateTime.now();
+        this.imagens = new ArrayList<>();
     }
 
     public String getId() {
@@ -73,38 +78,6 @@ public class Produto {
         this.categoria = categoria;
     }
 
-    public String getCaminhoObjetoJson() {
-        return caminhoObjetoJson;
-    }
-
-    public void setCaminhoObjetoJson(String caminhoObjetoJson) {
-        this.caminhoObjetoJson = caminhoObjetoJson;
-    }
-
-    public String getUrlPublicaJson() {
-        return urlPublicaJson;
-    }
-
-    public void setUrlPublicaJson(String urlPublicaJson) {
-        this.urlPublicaJson = urlPublicaJson;
-    }
-
-    public String getCaminhoObjetoImagem() {
-        return caminhoObjetoImagem;
-    }
-
-    public void setCaminhoObjetoImagem(String caminhoObjetoImagem) {
-        this.caminhoObjetoImagem = caminhoObjetoImagem;
-    }
-
-    public String getUrlPublicaImagem() {
-        return urlPublicaImagem;
-    }
-
-    public void setUrlPublicaImagem(String urlPublicaImagem) {
-        this.urlPublicaImagem = urlPublicaImagem;
-    }
-
     public LocalDateTime getDataCadastro() {
         return dataCadastro;
     }
@@ -113,8 +86,59 @@ public class Produto {
         this.dataCadastro = dataCadastro;
     }
 
+    public List<ProdutoImagem> getImagens() {
+        if (imagens == null) {
+            imagens = new ArrayList<>();
+        }
+        return imagens;
+    }
+
+    public void setImagens(List<ProdutoImagem> imagens) {
+        this.imagens = (imagens != null) ? new ArrayList<>(imagens) : new ArrayList<>();
+    }
+
+    /**
+     * Retorna a imagem principal (capa do catálogo) ou, se nenhuma estiver explicitamente
+     * marcada como principal, retorna a primeira imagem da lista caso exista.
+     */
+    @JsonIgnore
+    public Optional<ProdutoImagem> obterImagemPrincipal() {
+        if (imagens == null || imagens.isEmpty()) {
+            return Optional.empty();
+        }
+        return imagens.stream()
+                .filter(ProdutoImagem::isEhPrincipal)
+                .findFirst()
+                .or(() -> Optional.of(imagens.get(0)));
+    }
+
+    /**
+     * URL pública da imagem principal/capa para fácil consumo pelo frontend na vitrine.
+     */
+    @JsonProperty("urlImagemPrincipal")
+    public String getUrlImagemPrincipal() {
+        return obterImagemPrincipal().map(ProdutoImagem::getUrlPublica).orElse(null);
+    }
+
+    /**
+     * Caminho no GCS da imagem principal.
+     */
+    @JsonProperty("caminhoImagemPrincipal")
+    public String getCaminhoImagemPrincipal() {
+        return obterImagemPrincipal().map(ProdutoImagem::getCaminhoObjeto).orElse(null);
+    }
+
+    @JsonProperty("totalImagens")
+    public int getTotalImagens() {
+        return imagens != null ? imagens.size() : 0;
+    }
+
     @Override
     public String toString() {
+        String capa = obterImagemPrincipal()
+                .map(img -> img.getCaminhoObjeto() + " (" + img.getUrlPublica() + ")")
+                .orElse("(nenhuma imagem cadastrada)");
+
         return String.format(
                 """
                 ------------------------------------------------------------
@@ -124,10 +148,9 @@ public class Produto {
                 Preço               : R$ %s
                 Descrição           : %s
                 Data de Cadastro    : %s
-                Objeto JSON (GCS)   : %s
-                URL Pública JSON    : %s
-                Objeto Imagem (GCS) : %s
-                URL Pública Imagem  : %s
+                Armazenamento Dados : Banco de Dados Local SQLite (ecommerce.db)
+                Total de Imagens    : %d
+                Imagem Capa (GCS)   : %s
                 ------------------------------------------------------------""",
                 id,
                 nome,
@@ -135,10 +158,8 @@ public class Produto {
                 preco != null ? preco.toPlainString() : "0.00",
                 descricao,
                 dataCadastro != null ? dataCadastro.toString() : "N/A",
-                caminhoObjetoJson != null ? caminhoObjetoJson : "(não definido)",
-                urlPublicaJson != null ? urlPublicaJson : "(não definido)",
-                caminhoObjetoImagem != null ? caminhoObjetoImagem : "(sem imagem associada)",
-                urlPublicaImagem != null ? urlPublicaImagem : "(sem imagem associada)"
+                getTotalImagens(),
+                capa
         );
     }
 }

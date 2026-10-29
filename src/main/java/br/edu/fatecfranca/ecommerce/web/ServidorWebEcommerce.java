@@ -1,6 +1,7 @@
 package br.edu.fatecfranca.ecommerce.web;
 
 import br.edu.fatecfranca.ecommerce.model.Produto;
+import br.edu.fatecfranca.ecommerce.model.ProdutoImagem;
 import br.edu.fatecfranca.ecommerce.service.GcsStorageService;
 import br.edu.fatecfranca.ecommerce.service.ProdutoService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -32,6 +33,9 @@ import java.util.concurrent.Executors;
 /**
  * Servidor HTTP embutido em Java que expõe a API REST para o Frontend Web do E-commerce
  * e serve os arquivos estáticos (HTML, CSS e JavaScript) em http://localhost:8080.
+ *
+ * Integra o Banco de Dados Local SQLite (para metadados, entidades e capa)
+ * com o Google Cloud Storage (exclusivo para arquivos binários de imagem).
  */
 public class ServidorWebEcommerce {
 
@@ -55,10 +59,11 @@ public class ServidorWebEcommerce {
         server = HttpServer.create(new InetSocketAddress(porta), 0);
         server.setExecutor(Executors.newCachedThreadPool());
 
-        // Rotas da API REST integrada ao Google Cloud Storage
+        // Rotas da API REST integrada ao Google Cloud Storage e SQLite local
         server.createContext("/api/info", this::tratarInfoBucket);
         server.createContext("/api/produtos", this::tratarProdutos);
         server.createContext("/api/objetos", this::tratarObjetosBucket);
+        server.createContext("/api/demo", this::tratarDemo);
 
         // Rota para servir o Frontend Web (HTML, CSS, JS)
         server.createContext("/", this::tratarArquivosEstaticos);
@@ -73,7 +78,7 @@ public class ServidorWebEcommerce {
     }
 
     /**
-     * GET /api/info -> Retorna metadados do bucket e do grupo para exibir no painel Web.
+     * GET /api/info -> Retorna metadados do bucket, do SQLite e do grupo para o painel Web.
      */
     private void tratarInfoBucket(HttpExchange exchange) throws IOException {
         adicionarCabecalhosCors(exchange);
@@ -86,6 +91,9 @@ public class ServidorWebEcommerce {
         info.put("projeto", GcsStorageService.PROJECT_ID);
         info.put("bucket", GcsStorageService.BUCKET_NAME);
         info.put("urlPublicaBase", GcsStorageService.PUBLIC_BASE_URL);
+        info.put("bancoDados", "SQLite local (ecommerce.db)");
+        info.put("totalProdutos", produtoService.getDatabaseService().contarProdutos());
+        info.put("totalImagens", produtoService.getDatabaseService().contarImagens());
         info.put("localizacao", "us-central1");
         info.put("classeArmazenamento", "STANDARD");
         info.put("serviceAccount", "sa-grupo-i@serjava-demo.iam.gserviceaccount.com");
@@ -100,12 +108,44 @@ public class ServidorWebEcommerce {
     }
 
     /**
+     * POST /api/demo/seed -> Executa a carga de demonstração com 10 produtos e 3 imagens cada.
+     */
+    private void tratarDemo(HttpExchange exchange) throws IOException {
+        adicionarCabecalhosCors(exchange);
+        String metodo = exchange.getRequestMethod().toUpperCase();
+        if ("OPTIONS".equals(metodo)) {
+            exchange.sendResponseHeaders(204, -1);
+            return;
+        }
+
+        String path = exchange.getRequestURI().getPath();
+        if (("POST".equals(metodo) || "GET".equals(metodo)) && (path.endsWith("/seed") || path.endsWith("/demo"))) {
+            try {
+                int fotosEnviadas = produtoService.popularCargaDemonstracao();
+                enviarJson(exchange, 200, Map.of(
+                        "sucesso", true,
+                        "mensagem", "Carga de demonstração executada com sucesso! 10 produtos cadastrados e " + fotosEnviadas + " imagens enviadas para o bucket GCS.",
+                        "produtosCadastrados", 10,
+                        "imagensEnviadas", fotosEnviadas
+                ));
+            } catch (Exception e) {
+                enviarErro(exchange, 500, "Erro ao popular demonstração: " + e.getMessage());
+            }
+            return;
+        }
+
+        enviarErro(exchange, 404, "Rota não encontrada.");
+    }
+
+    /**
      * Gerencia as rotas de produtos:
-     * - GET    /api/produtos                  -> Lista todos os produtos do bucket
-     * - POST   /api/produtos                  -> Cadastra novo produto (salva JSON no GCS)
-     * - GET    /api/produtos/{id}             -> Consulta um produto específico
-     * - DELETE /api/produtos/{id}             -> Exclui o produto e sua imagem do bucket
-     * - POST   /api/produtos/{id}/imagem      -> Faz upload da imagem do produto para o GCS
+     * - GET    /api/produtos                                    -> Lista produtos (com capa e total de fotos)
+     * - POST   /api/produtos                                    -> Cadastra produto no SQLite
+     * - GET    /api/produtos/{id}                               -> Consulta produto com todas as fotos
+     * - DELETE /api/produtos/{id}                               -> Exclui produto do SQLite e imagens do GCS
+     * - POST   /api/produtos/{id}/imagens                       -> Envia nova foto para o produto no GCS
+     * - PUT    /api/produtos/{id}/imagens/{imgId}/principal     -> Marca foto como capa
+     * - DELETE /api/produtos/{id}/imagens/{imgId}               -> Exclui foto individualmente
      */
     private void tratarProdutos(HttpExchange exchange) throws IOException {
         adicionarCabecalhosCors(exchange);
@@ -137,11 +177,12 @@ public class ServidorWebEcommerce {
                 return;
             }
 
-            // Sub-rotas: /api/produtos/{id} ou /api/produtos/{id}/imagem
+            // Sub-rotas: /api/produtos/...
             String[] partes = sufixo.split("/");
             String idProduto = URLDecoder.decode(partes[0], StandardCharsets.UTF_8);
 
-            if (partes.length == 2 && "imagem".equalsIgnoreCase(partes[1])) {
+            // POST /api/produtos/{id}/imagem (compatibilidade anterior)
+            if (partes.length == 2 && ("imagem".equalsIgnoreCase(partes[1]) || "imagens".equalsIgnoreCase(partes[1]))) {
                 if ("POST".equals(metodo)) {
                     uploadImagemViaStream(exchange, idProduto);
                     return;
@@ -150,11 +191,54 @@ public class ServidorWebEcommerce {
                 return;
             }
 
+            // Ações específicas sobre imagens:
+            // PUT  /api/produtos/{id}/imagens/{imagemId}/principal
+            // POST /api/produtos/{id}/imagens/{imagemId}/principal
+            if (partes.length == 4 && "imagens".equalsIgnoreCase(partes[1]) && "principal".equalsIgnoreCase(partes[3])) {
+                if ("PUT".equals(metodo) || "POST".equals(metodo)) {
+                    Long imagemId = Long.parseLong(partes[2]);
+                    boolean sucesso = produtoService.definirImagemPrincipal(idProduto, imagemId);
+                    if (!sucesso) {
+                        enviarErro(exchange, 404, "Imagem não encontrada.");
+                    } else {
+                        enviarJson(exchange, 200, Map.of(
+                                "sucesso", true,
+                                "mensagem", "Imagem definida como principal (capa) com sucesso."
+                        ));
+                    }
+                    return;
+                }
+                enviarErro(exchange, 405, "Use PUT ou POST para definir imagem principal.");
+                return;
+            }
+
+            // DELETE /api/produtos/{id}/imagens/{imagemId}
+            if (partes.length == 3 && "imagens".equalsIgnoreCase(partes[1])) {
+                if ("DELETE".equals(metodo)) {
+                    Long imagemId = Long.parseLong(partes[2]);
+                    boolean removido = produtoService.excluirImagemIndividual(idProduto, imagemId);
+                    if (!removido) {
+                        enviarErro(exchange, 404, "Imagem não encontrada para exclusão.");
+                    } else {
+                        enviarJson(exchange, 200, Map.of(
+                                "sucesso", true,
+                                "mensagem", "Imagem removida do Google Cloud Storage e do banco local com sucesso."
+                        ));
+                    }
+                    return;
+                }
+                enviarErro(exchange, 405, "Use DELETE para apagar imagem.");
+                return;
+            }
+
+            // Operações no próprio produto:
+            // GET /api/produtos/{id}
+            // DELETE /api/produtos/{id}
             if (partes.length == 1) {
                 if ("GET".equals(metodo)) {
                     Optional<Produto> prodOpt = produtoService.buscarProdutoPorId(idProduto);
                     if (prodOpt.isEmpty()) {
-                        enviarErro(exchange, 404, "Produto '" + idProduto + "' não encontrado no bucket.");
+                        enviarErro(exchange, 404, "Produto '" + idProduto + "' não encontrado.");
                     } else {
                         enviarJson(exchange, 200, prodOpt.get());
                     }
@@ -167,7 +251,7 @@ public class ServidorWebEcommerce {
                     } else {
                         enviarJson(exchange, 200, Map.of(
                                 "sucesso", true,
-                                "mensagem", "Produto '" + produtoService.normalizarIdProduto(idProduto) + "' excluído do Google Cloud Storage com sucesso."
+                                "mensagem", "Produto '" + produtoService.normalizarIdProduto(idProduto) + "' e suas imagens foram excluídos com sucesso."
                         ));
                     }
                     return;
@@ -218,8 +302,8 @@ public class ServidorWebEcommerce {
     private void uploadImagemViaStream(HttpExchange exchange, String idProduto) throws IOException {
         Map<String, String> params = lerQueryParams(exchange.getRequestURI());
         String nomeArquivo = params.getOrDefault("nomeArquivo", "imagem.png");
+        boolean ehPrincipal = Boolean.parseBoolean(params.getOrDefault("principal", "false"));
 
-        // Extrai extensão segura do arquivo enviado
         int idxPonto = nomeArquivo.lastIndexOf('.');
         String sufixoExt = (idxPonto != -1) ? nomeArquivo.substring(idxPonto) : ".png";
 
@@ -228,18 +312,17 @@ public class ServidorWebEcommerce {
             try (InputStream in = exchange.getRequestBody()) {
                 Files.copy(in, arquivoTemp, StandardCopyOption.REPLACE_EXISTING);
             }
-            Produto atualizado = produtoService.anexarImagemAoProduto(idProduto, arquivoTemp);
-            enviarJson(exchange, 200, atualizado);
+            ProdutoImagem imagemCriada = produtoService.anexarImagemAoProduto(idProduto, arquivoTemp, ehPrincipal);
+            enviarJson(exchange, 200, imagemCriada);
         } finally {
             Files.deleteIfExists(arquivoTemp);
         }
     }
 
     /**
-     * Rotas para explorar objetos diretamente no bucket:
-     * - GET /api/objetos                           -> Lista objetos em produtos/ e imagens/
-     * - GET /api/objetos/conteudo?caminho=...      -> Lê o conteúdo UTF-8 de um objeto do GCS
-     * - GET /api/objetos/download?caminho=...      -> Faz download do objeto para a pasta downloads/ e para o navegador
+     * Rotas para explorar imagens diretamente no bucket:
+     * - GET /api/objetos                           -> Lista objetos em imagens/
+     * - GET /api/objetos/download?caminho=...      -> Download direto do objeto
      */
     private void tratarObjetosBucket(HttpExchange exchange) throws IOException {
         adicionarCabecalhosCors(exchange);
@@ -254,34 +337,13 @@ public class ServidorWebEcommerce {
 
         try {
             if (path.equals("/api/objetos") || path.equals("/api/objetos/")) {
-                List<String> produtos = gcsService.listarObjetosPorPrefixo(ProdutoService.PREFIXO_PRODUTOS);
                 List<String> imagens = gcsService.listarObjetosPorPrefixo(ProdutoService.PREFIXO_IMAGENS);
 
                 Map<String, Object> resposta = new LinkedHashMap<>();
                 resposta.put("bucket", GcsStorageService.BUCKET_NAME);
                 resposta.put("urlPublicaBase", GcsStorageService.PUBLIC_BASE_URL);
-                resposta.put("objetosProdutos", produtos);
                 resposta.put("objetosImagens", imagens);
                 enviarJson(exchange, 200, resposta);
-                return;
-            }
-
-            if (path.equals("/api/objetos/conteudo")) {
-                String caminho = query.getOrDefault("caminho", "");
-                if (caminho.isBlank()) {
-                    enviarErro(exchange, 400, "Informe o parâmetro 'caminho'.");
-                    return;
-                }
-                Optional<String> textoOpt = gcsService.lerObjetoComoTexto(caminho);
-                if (textoOpt.isEmpty()) {
-                    enviarErro(exchange, 404, "Objeto '" + caminho + "' não encontrado no bucket.");
-                    return;
-                }
-                Map<String, Object> resultado = new LinkedHashMap<>();
-                resultado.put("caminho", caminho);
-                resultado.put("urlPublica", gcsService.gerarUrlPublica(caminho));
-                resultado.put("conteudo", textoOpt.get());
-                enviarJson(exchange, 200, resultado);
                 return;
             }
 
@@ -317,16 +379,12 @@ public class ServidorWebEcommerce {
         }
     }
 
-    /**
-     * Serve os arquivos estáticos do Frontend Web (index.html, styles.css, app.js).
-     */
     private void tratarArquivosEstaticos(HttpExchange exchange) throws IOException {
         String caminho = exchange.getRequestURI().getPath();
         if (caminho.equals("/") || caminho.isBlank()) {
             caminho = "/index.html";
         }
 
-        // Previne navegação indevida de diretórios
         if (caminho.contains("..")) {
             enviarErro(exchange, 403, "Acesso negado.");
             return;
@@ -346,7 +404,6 @@ public class ServidorWebEcommerce {
     }
 
     private byte[] carregarRecursoWeb(String caminhoRelativo) throws IOException {
-        // Prioriza leitura direta do diretório local para facilitar ajustes rápidos
         Path arquivoDisco = Path.of("src", "main", "resources", "web" + caminhoRelativo);
         if (Files.exists(arquivoDisco) && Files.isRegularFile(arquivoDisco)) {
             return Files.readAllBytes(arquivoDisco);
@@ -378,7 +435,7 @@ public class ServidorWebEcommerce {
 
     private void adicionarCabecalhosCors(HttpExchange exchange) {
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+        exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         exchange.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, X-File-Name");
     }
 

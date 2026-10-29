@@ -44,23 +44,7 @@ public class GcsStorageService {
     }
 
     private Storage inicializarStorage() {
-        String credPath = System.getenv("GOOGLE_APPLICATION_CREDENTIALS");
-        if (credPath == null || credPath.isBlank()) {
-            throw new IllegalStateException(
-                    "A variável de ambiente GOOGLE_APPLICATION_CREDENTIALS não está definida.\n" +
-                    "No PowerShell, configure-a apontando para o arquivo sa-grupo-i-key.json:\n" +
-                    "$env:GOOGLE_APPLICATION_CREDENTIALS=\"$(Get-Location)\\sa-grupo-i-key.json\""
-            );
-        }
-
-        Path path = Path.of(credPath);
-        if (!Files.exists(path) || !Files.isRegularFile(path)) {
-            throw new IllegalStateException(
-                    "O arquivo de credenciais configurado em GOOGLE_APPLICATION_CREDENTIALS não foi encontrado: "
-                    + path.toAbsolutePath()
-            );
-        }
-
+        Path path = resolverCaminhoCredenciais();
         try {
             GoogleCredentials credentials = GoogleCredentials.fromStream(Files.newInputStream(path));
             return StorageOptions.newBuilder()
@@ -70,22 +54,49 @@ public class GcsStorageService {
                     .getService();
         } catch (IOException e) {
             throw new IllegalStateException(
-                    "Falha ao ler ou processar o arquivo de credenciais da Service Account. " +
+                    "Falha ao ler ou processar o arquivo de credenciais da Service Account (" + path + "). " +
                     "Verifique se o JSON é válido.", e
             );
         }
     }
 
+    private Path resolverCaminhoCredenciais() {
+        String credEnv = System.getenv("GOOGLE_APPLICATION_CREDENTIALS");
+        if (credEnv != null && !credEnv.isBlank()) {
+            Path p = Path.of(credEnv);
+            if (Files.exists(p) && Files.isRegularFile(p)) {
+                return p;
+            }
+        }
+
+        // Tenta na raiz do projeto
+        Path localPath = Path.of("sa-grupo-i-key.json");
+        if (Files.exists(localPath) && Files.isRegularFile(localPath)) {
+            return localPath;
+        }
+
+        // Tenta local de fallback conhecido na máquina
+        Path fallbackUser = Path.of("C:", "Users", "Arthu", "OneDrive", "Desktop", "ProjetoMensageria", "ProjetoMensageria", "sa-grupo-i-key.json");
+        if (Files.exists(fallbackUser) && Files.isRegularFile(fallbackUser)) {
+            return fallbackUser;
+        }
+
+        throw new IllegalStateException(
+                "A variável de ambiente GOOGLE_APPLICATION_CREDENTIALS não está definida e o arquivo sa-grupo-i-key.json não foi encontrado.\n" +
+                "No PowerShell, configure-a apontando para o arquivo sa-grupo-i-key.json:\n" +
+                "$env:GOOGLE_APPLICATION_CREDENTIALS=\"$(Get-Location)\\sa-grupo-i-key.json\""
+        );
+    }
+
     /**
-     * Envia um conteúdo de texto (como JSON em UTF-8) para o bucket via stream.
+     * Envia um array de bytes (ex: imagem gerada dinamicamente) para o bucket via stream.
      *
-     * @param objectName  Caminho do objeto dentro do bucket (ex: "produtos/produto-001.json")
-     * @param conteudo    Conteúdo em texto UTF-8
-     * @param contentType Tipo MIME (ex: "application/json; charset=utf-8")
+     * @param objectName  Caminho do objeto dentro do bucket (ex: "imagens/produto-001/foto-1.png")
+     * @param bytes       Bytes do arquivo
+     * @param contentType Tipo MIME (ex: "image/png" ou "image/jpeg")
      * @return Blob criado no GCS
      */
-    public Blob uploadTextoUtf8(String objectName, String conteudo, String contentType) {
-        byte[] bytes = conteudo.getBytes(StandardCharsets.UTF_8);
+    public Blob uploadBytes(String objectName, byte[] bytes, String contentType) {
         BlobId blobId = BlobId.of(BUCKET_NAME, objectName);
         BlobInfo blobInfo = BlobInfo.newBuilder(blobId)
                 .setContentType(contentType)
@@ -94,10 +105,23 @@ public class GcsStorageService {
         try (InputStream inputStream = new ByteArrayInputStream(bytes)) {
             return storage.createFrom(blobInfo, inputStream);
         } catch (StorageException e) {
-            throw tratarStorageException("enviar objeto JSON '" + objectName + "'", e);
+            throw tratarStorageException("enviar imagem '" + objectName + "'", e);
         } catch (IOException e) {
-            throw new RuntimeException("Erro de I/O ao enviar stream de texto para o GCS: " + e.getMessage(), e);
+            throw new RuntimeException("Erro de I/O ao enviar stream de bytes para o GCS: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Envia um conteúdo de texto (como JSON em UTF-8) para o bucket via stream.
+     *
+     * @param objectName  Caminho do objeto dentro do bucket
+     * @param conteudo    Conteúdo em texto UTF-8
+     * @param contentType Tipo MIME (ex: "application/json; charset=utf-8")
+     * @return Blob criado no GCS
+     */
+    public Blob uploadTextoUtf8(String objectName, String conteudo, String contentType) {
+        byte[] bytes = conteudo.getBytes(StandardCharsets.UTF_8);
+        return uploadBytes(objectName, bytes, contentType);
     }
 
     /**
